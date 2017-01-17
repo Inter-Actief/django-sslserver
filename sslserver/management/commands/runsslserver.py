@@ -22,13 +22,13 @@ if LooseVersion(get_version()) >= LooseVersion('1.5'):
 else:
     upath = unicode
 
+
 class SecureHTTPServer(WSGIServer):
     def __init__(self, address, handler_cls, certificate, key):
         super(SecureHTTPServer, self).__init__(address, handler_cls)
-        self.socket = ssl.wrap_socket(self.socket, certfile=certificate,
-                                      keyfile=key, server_side=True,
-                                      ssl_version=ssl.PROTOCOL_TLSv1_2,
-                                      cert_reqs=ssl.CERT_NONE)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        context.load_cert_chain(certfile=certificate, keyfile=key)
+        self.socket = context.wrap_socket(self.socket, server_side=True)
 
 
 class WSGIRequestHandler(WSGIRequestHandler):
