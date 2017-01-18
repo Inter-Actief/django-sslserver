@@ -27,6 +27,7 @@ class SecureHTTPServer(WSGIServer):
     def __init__(self, address, handler_cls, certificate, key):
         super(SecureHTTPServer, self).__init__(address, handler_cls)
         context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        context.set_ciphers("-ALL:EECDH+ECDSA+AESGCM:EECDH+aRSA+AESGCM:EDH+aRSA+AESGCM:EECDH+ECDSA+AES:EECDH+aRSA+AES:EDH+aRSA+AES:RSA+3DES")
         context.load_cert_chain(certfile=certificate, keyfile=key)
         self.socket = context.wrap_socket(self.socket, server_side=True)
 
