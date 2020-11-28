@@ -1,31 +1,53 @@
 from datetime import datetime
-from optparse import make_option
-from distutils.version import LooseVersion
+
 import os
 import ssl
 import sys
 
+try:
+    from pathlib import Path
+except ImportError:
+    # removed in django version 3
+    from django.utils._os import upath
+
 from django.core.servers.basehttp import WSGIRequestHandler
-from django.core.servers.basehttp import WSGIServer
 from django.core.management.base import CommandError
 from django.core.management.commands import runserver
 from django.contrib.staticfiles.handlers import StaticFilesHandler
-from django import get_version
+
+
+if  (sys.version_info[0] > 3) or \
+    (sys.version_info[0] == 3 and sys.version_info[1] >= 6) or \
+    (sys.version_info[0] == 3 and sys.version_info[1] == 5 and sys.version_info[2] >= 3) or \
+    (sys.version_info[0] == 2 and sys.version_info[1] == 7 and sys.version_info[2] >= 13):
+    _ssl_version = ssl.PROTOCOL_TLS
+else:
+    _ssl_version = ssl.PROTOCOL_SSLv23
 
 try:
     from django.core.servers.basehttp import WSGIServerException
 except ImportError:
     from socket import error as WSGIServerException
 
-if LooseVersion(get_version()) >= LooseVersion('1.5'):
-    from django.utils._os import upath
-else:
-    upath = unicode
+try:
+    # introduced in Django 2.0
+    from django.core.servers.basehttp import ThreadedWSGIServer
+except ImportError:
+    try:
+        import socketserver
+    except ImportError:
+        # Python 2 compatibility
+        import SocketServer as socketserver
+    from django.core.servers.basehttp import WSGIServer
+
+    class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+        """A threaded version of the WSGIServer"""
+        pass
 
 
 class SecureHTTPServer(WSGIServer):
-    def __init__(self, address, handler_cls, certificate, key):
-        super(SecureHTTPServer, self).__init__(address, handler_cls)
+    def __init__(self, address, handler_cls, certificate, key, ipv6=False):
+        super(SecureHTTPServer, self).__init__(address, handler_cls, ipv6=ipv6)
         context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
         context.set_ciphers("-ALL:EECDH+ECDSA+AESGCM:EECDH+aRSA+AESGCM:EDH+aRSA+AESGCM:EECDH+ECDSA+AES:EECDH+aRSA+AES:EDH+aRSA+AES:RSA+3DES")
         context.load_cert_chain(certfile=certificate, keyfile=key)
@@ -41,8 +63,14 @@ class WSGIRequestHandler(WSGIRequestHandler):
 
 def default_ssl_files_dir():
     import sslserver as app_module
-    mod_path = os.path.dirname(upath(app_module.__file__))
-    ssl_dir = os.path.join(mod_path, "certs")
+
+    try:
+        ssl_dir = str(Path(app_module.__file__).parent / 'certs')
+    except NameError:
+        # Django < 3 backwards compatibility
+        mod_path = os.path.dirname(upath(app_module.__file__))
+        ssl_dir = os.path.join(mod_path, "certs")
+
     return ssl_dir
 
 
@@ -58,9 +86,11 @@ class Command(runserver.Command):
                                 "development.key"),
                             help="Path to the key file"),
         parser.add_argument("--nostatic", dest='use_static_handler',
-                            action='store_false', default=None),
+                            action='store_false', default=None,
+                            help="Do not use internal static file handler"),
         parser.add_argument("--static", dest='use_static_handler',
-                            action='store_true'),
+                            action='store_true',
+                            help="Use internal static file handler"),
 
     help = "Run a Django development server over HTTPS"
 
@@ -141,7 +171,7 @@ class Command(runserver.Command):
             handler = self.get_handler(*args, **options)
             server = SecureHTTPServer((self.addr, int(self.port)),
                                       WSGIRequestHandler,
-                                      cert_file, key_file)
+                                      cert_file, key_file, ipv6=self.use_ipv6)
             server.set_app(handler)
             server.serve_forever()
 
